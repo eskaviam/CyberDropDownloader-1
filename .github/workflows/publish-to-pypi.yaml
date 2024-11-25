@@ -41,9 +41,10 @@ jobs:
       - name: Add secret token
         id: setup-secret
         env:
-          TWINE_PASSWORD: aaaaaaa
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: |
-          echo KEY: ${TWINE_PASSWORD}
+          poetry config pypi-token.testpypi {PYPI_TOKEN}
+          poetry config --list
 
       - name: Publish to PyPI
         env:
