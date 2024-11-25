@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cyberdrop-dl-sting"
-version = "5.3.32"
+version = "5.3.49"
 description = "Bulk downloader for multiple file hosts"
 authors = ["Sting ray <stingray9667@gmail.com>"]
 readme = "README.md"
