@@ -41,7 +41,7 @@ jobs:
       - name: Add secret token
         id: setup-secret
         env:
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKENiii }}
         run: |
           echo KEY: '${TWINE_PASSWORD}'
 
