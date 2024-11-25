@@ -43,7 +43,7 @@ jobs:
         env:
           TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
-        echo KEY: '${TWINE_PASSWORD}'
+          echo KEY: '${TWINE_PASSWORD}'
 
       - name: Publish to PyPI
         env:
