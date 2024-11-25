@@ -9,6 +9,7 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+    environment: PyPi-Publisher
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
