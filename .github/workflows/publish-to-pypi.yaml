@@ -41,8 +41,9 @@ jobs:
       - name: Add secret token
         id: setup-secret
         env:
-          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        run: printenv | grep PYPI_TOKEN
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+        echo KEY: '${TWINE_PASSWORD}'
 
       - name: Publish to PyPI
         env:
