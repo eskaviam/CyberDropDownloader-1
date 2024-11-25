@@ -39,7 +39,9 @@ jobs:
 
       - name: Add secret token
         id: setup-secret
-        run: poetry config pypi-token.testpypi ${{ secrets.PYPI_TOKEN }}
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: poetry config pypi-token.testpypi $PYPI_TOKEN
 
       - name: Publish to PyPI
         env:
