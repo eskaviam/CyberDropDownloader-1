@@ -42,7 +42,7 @@ jobs:
         id: setup-secret
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        run: printenv
+        run: printenv | grep PYPI_TOKEN
 
       - name: Publish to PyPI
         env:
