@@ -41,7 +41,7 @@ jobs:
         id: setup-secret
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        run: echo "$PYPI_TOKEN"
+        run: echo PYPI_TOKEN: '${PYPI_TOKEN}'
 
       - name: Publish to PyPI
         env:
