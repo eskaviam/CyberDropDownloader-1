@@ -1,11 +1,11 @@
 [tool.poetry]
-name = "cyberdrop-dl"
+name = "cyberdrop-dl-sting"
 version = "5.3.32"
 description = "Bulk downloader for multiple file hosts"
-authors = ["Jules Winnfield <juleswinnfieldII@protonmail.com>"]
+authors = ["Sting ray <stingray9667@gmail.com>"]
 readme = "README.md"
-repository = "https://github.com/Jules-WinnfieldX/CyberDropDownloader"
-documentation = "https://jules-winnfieldx.gitbook.io/cyberdrop-dl/"
+repository = "https://github.com/stingray9667/CyberDropDownloader"
+documentation = "https://github.com/stingray9667/CyberDropDownloader/wiki"
 packages = [{include = "cyberdrop_dl"}]
 
 [tool.poetry.dependencies]

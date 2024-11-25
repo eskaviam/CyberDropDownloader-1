@@ -33,7 +33,15 @@ jobs:
         run: |
           [[ "$(poetry version --short)" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || echo prerelease=true >> $GITHUB_OUTPUT
 
+      - name: Setup to testpypi
+        id: setup-alt-publisher
+        run: poetry config repositories.testpypi https://test.pypi.org/legacy/
+
+      - name: Add secret token
+        id: setup-secret
+        run: poetry config pypi-token.testpypi ${{ secrets.PYPI_TOKEN }}
+
       - name: Publish to PyPI
         env:
           POETRY_PYPI_TOKEN_PYPI: ${{ secrets.PYPI_TOKEN }}
-        run: poetry publish
+        run: poetry publish -r testpypi
