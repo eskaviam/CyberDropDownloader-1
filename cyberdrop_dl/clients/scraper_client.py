@@ -99,7 +99,6 @@ class ScraperClient:
         self, domain: str, url: str, client_session: ClientSession
     ) -> BeautifulSoup:
         """Returns a BeautifulSoup Object from given url, wit referrer attribute in headers"""
-        logger.error('')
         referrer = {"Referer": "CybeDrop-dl"}
         async with client_session.get(
             url,
