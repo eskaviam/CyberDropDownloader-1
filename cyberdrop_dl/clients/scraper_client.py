@@ -95,6 +95,33 @@ class ScraperClient:
             return BeautifulSoup(text, 'html.parser')
 
     @limiter
+    async def get_BS4_with_referrer(
+        self, domain: str, url: str, client_session: ClientSession
+    ) -> BeautifulSoup:
+        """Returns a BeautifulSoup Object from given url, wit referrer attribute in headers"""
+        logger.error('')
+        referrer = {"Referer": "CybeDrop-dl"}
+        async with client_session.get(
+            url,
+            headers=self._headers | referrer,
+            ssl=self.client_manager.ssl_context,
+            proxy=self.client_manager.proxy,
+        ) as response:
+            try:
+                await self.client_manager.check_http_status(response)
+            except DDOSGuardFailure:
+                response_text = await self.flaresolverr(domain, url)
+                return BeautifulSoup(response_text, "html.parser")
+            content_type = response.headers.get("Content-Type")
+            assert content_type is not None
+            if not any(s in content_type.lower() for s in ("html", "text")):
+                raise InvalidContentTypeFailure(
+                    message=f"Received {content_type}, was expecting text"
+                )
+            text = await response.text()
+            return BeautifulSoup(text, "html.parser")
+
+    @limiter
     async def get_BS4_and_return_URL(self, domain: str, url: URL, client_session: ClientSession) -> tuple[BeautifulSoup, URL]:
         """Returns a BeautifulSoup object and response URL from the given URL"""
         async with client_session.get(url, headers=self._headers, ssl=self.client_manager.ssl_context,
