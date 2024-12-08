@@ -38,6 +38,7 @@ class XXEmbedCrawler(Crawler):
     @error_handling_wrapper
     async def album(self, scrape_item: ScrapeItem) -> None:
         async with self.request_limiter:
+            task_id = await self.scraping_progress.add_task(scrape_item.url)
             soup = await self.client.get_BS4_with_referrer(self.domain, scrape_item.url)
 
             album_id = self.get_album_id(str(scrape_item.url))
@@ -51,17 +52,31 @@ class XXEmbedCrawler(Crawler):
                 scrape_video = ScrapeItem(new_url, parent_title="", album_id=album_id)
                 await self.video(scrape_video)
 
+            await self.scraping_progress.remove_task(task_id)
+
     @error_handling_wrapper
     async def video(self, scrape_item: ScrapeItem) -> None:
         async with self.request_limiter:
-            soup = await self.client.get_BS4_with_referrer(self.domain, scrape_item.url)
-            url = self.get_playlist_url(soup)
-            file_name = self.get_album_name(str(scrape_item.url)) + ".mp4"
-            download_dir = self.get_save_path(scrape_item)
+            try:
+                task_id = await self.scraping_progress.add_task(scrape_item.url)
+                download_progress = (
+                    await self.manager.progress_manager.download_progress.update_total()
+                )
+                soup = await self.client.get_BS4_with_referrer(
+                    self.domain, scrape_item.url
+                )
+                url = self.get_playlist_url(soup)
+                file_name = self.get_album_name(str(scrape_item.url)) + ".mp4"
+                download_dir = self.get_save_path(scrape_item)
 
-            # for some strange reason it always download file to home directory
-            m3u8_To_MP4.multithread_download(url, mp4_file_name=file_name)
-            self.move_file(file_name, download_dir)
+                # for some strange reason it always download file to home directory
+                m3u8_To_MP4.multithread_download(url, mp4_file_name=file_name)
+                self.move_file(file_name, download_dir)
+                await self.scraping_progress.remove_task(task_id)
+                await self.manager.progress_manager.download_progress.add_completed()
+            except:
+                await self.manager.progress_manager.download_progress.add_failed()
+                pass
 
     def move_file(self, file_name: str, download_dir: str):
         current_path = os.path.join(os.getcwd(), file_name)
@@ -91,7 +106,9 @@ class XXEmbedCrawler(Crawler):
                 os.getcwd(), default_download_path, "Loose_files_xxembed"
             )
         else:
-            return os.path.join(os.getcwd(), default_download_path, scrape_item.album_id)
+            return os.path.join(
+                os.getcwd(), default_download_path, scrape_item.album_id
+            )
 
     def get_album_id(self, url: str):
         return url.split("/").pop()
