@@ -22,7 +22,7 @@ class GoFileCrawler(Crawler):
     def __init__(self, manager: Manager):
         super().__init__(manager, "gofile", "GoFile")
         self.api_address = URL("https://api.gofile.io")
-        self.js_address = URL("https://gofile.io/dist/js/alljs.js")
+        self.js_address = URL("https://gofile.io/dist/js/global.js")
         self.primary_base_domain = URL("https://gofile.io")
         self.token = ""
         self.websiteToken = ""
@@ -134,7 +134,7 @@ class GoFileCrawler(Crawler):
         async with self.request_limiter:
             text = await session.get_text(self.domain, js_address)
         text = str(text)
-        self.websiteToken = re.search(r'fetchData\s=\s\{\swt:\s"(.*?)"', text).group(1)
+        self.websiteToken = re.search(r'appdata\.wt\s=\s"(.*?)"', text).group(1)
         if not self.websiteToken:
             raise ScrapeFailure(403, "Couldn't generate GoFile websiteToken")
         self.manager.cache_manager.save("gofile_website_token", self.websiteToken)
