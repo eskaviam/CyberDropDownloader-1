@@ -8,6 +8,7 @@ from http import HTTPStatus
 from functools import wraps, partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Tuple
+import re
 
 import aiofiles
 import aiohttp
@@ -107,6 +108,25 @@ class DownloadClient:
                 
             await self.client_manager.check_http_status(resp, download=True)
             content_type = resp.headers.get('Content-Type')
+            
+            # Check for Content-Disposition header to get the correct filename
+            content_disposition = resp.headers.get('Content-Disposition', '')
+            if 'filename=' in content_disposition and (domain == "pd.cybar.xyz" or domain == "pixeldrain"):
+                try:
+                    # Match filename="something.ext" or filename=something.ext
+                    match = re.search(r'filename=(?:"([^"]+)"|([^;]+))', content_disposition)
+                    if match:
+                        # Get the matched group (either quoted or unquoted)
+                        new_filename = match.group(1) if match.group(1) else match.group(2)
+                        if new_filename:
+                            await log(f"Updated filename from Content-Disposition: {new_filename}", 10)
+                            # Update the media item with the new filename
+                            media_item.filename = new_filename
+                            # Update the partial file path
+                            downloaded_filename = await self.manager.db_manager.history_table.get_downloaded_filename(domain, media_item)
+                            media_item.partial_file = download_dir / f"{downloaded_filename}.part"
+                except Exception as e:
+                    await log(f"Error parsing Content-Disposition header: {e}", 30)
             
             media_item.filesize = int(resp.headers.get('Content-Length', '0'))
             if not isinstance(media_item.complete_file, Path):

@@ -175,5 +175,47 @@ class ScraperClient:
     async def get_head(self, domain: str, url: URL, client_session: ClientSession) -> CIMultiDictProxy[str]:
         """Returns the headers from the given URL"""
         async with client_session.head(url, headers=self._headers, ssl=self.client_manager.ssl_context,
-                                       proxy=self.client_manager.proxy) as response:
+                                       proxy=self.client_manager.proxy, allow_redirects=False) as response:
+            await self.client_manager.check_http_status(response)
             return response.headers
+
+    @limiter
+    async def get_redirect(self, domain: str, url: URL, client_session: ClientSession) -> URL:
+        """Follows redirects and returns the final URL"""
+        current_url = url
+        max_redirects = 10  # Prevent infinite redirect loops
+        redirects = 0
+        
+        while redirects < max_redirects:
+            async with client_session.get(current_url, headers=self._headers, ssl=self.client_manager.ssl_context,
+                                         proxy=self.client_manager.proxy, allow_redirects=False) as response:
+                # Check if we got a redirect
+                if response.status in (301, 302, 303, 307, 308):
+                    location = response.headers.get('Location')
+                    if location:
+                        # If it's a relative URL, make it absolute
+                        if location.startswith('/'):
+                            new_url = URL(f"{current_url.scheme}://{current_url.host}{location}")
+                        else:
+                            new_url = URL(location)
+                        
+                        await log(f"Following redirect from {current_url} to {new_url}", 10)
+                        current_url = new_url
+                        redirects += 1
+                    else:
+                        # No location header, break the loop
+                        break
+                else:
+                    # No redirect status, break the loop
+                    await self.client_manager.check_http_status(response)
+                    break
+        
+        return current_url
+
+    @limiter
+    async def get_response(self, domain: str, url: URL, client_session: ClientSession) -> aiohttp.ClientResponse:
+        """Returns the response object from the given URL"""
+        response = await client_session.get(url, headers=self._headers, ssl=self.client_manager.ssl_context,
+                                          proxy=self.client_manager.proxy)
+        await self.client_manager.check_http_status(response)
+        return response

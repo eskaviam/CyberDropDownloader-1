@@ -47,10 +47,11 @@ class ClientManager:
             "coomer": AsyncLimiter(1, 1),
             "kemono": AsyncLimiter(1, 1),
             "pixeldrain": AsyncLimiter(10, 1),
+            "pd.cybar.xyz": AsyncLimiter(15, 1),  # Higher limit for the bypass site
             "other": AsyncLimiter(25, 1)
         }
         
-        self.download_spacer = {'bunkr': 0.5, 'bunkrr': 0.5, 'cyberdrop': 0, 'cyberfile': 0, "pixeldrain": 0, "coomer": 0.5, "kemono": 0.5}
+        self.download_spacer = {'bunkr': 0.5, 'bunkrr': 0.5, 'cyberdrop': 0, 'cyberfile': 0, "pixeldrain": 0, "pd.cybar.xyz": 0, "coomer": 0.5, "kemono": 0.5}
 
         self.global_rate_limiter = AsyncLimiter(self.rate_limit, 1)
         self.session_limit = asyncio.Semaphore(50)

@@ -35,7 +35,7 @@ class ScrapeMapper:
                         "host.church": self.jpgchurch, "kemono": self.kemono, "leakedmodels": self.leakedmodels,
                         "mediafire": self.mediafire, "nudostar.com": self.nudostar, "nudostar.tv": self.nudostartv,
                         "omegascans": self.omegascans, "pimpandhost": self.pimpandhost, "pixeldrain": self.pixeldrain,
-                        "postimg": self.postimg, "realbooru": self.realbooru, "reddit": self.reddit, 
+                        "pd.cybar.xyz": self.pixeldrain_bypass, "postimg": self.postimg, "realbooru": self.realbooru, "reddit": self.reddit, 
                         "redd.it": self.reddit, "redgifs": self.redgifs, "rule34vault": self.rule34vault, "rule34.xxx": self.rule34xxx,
                         "rule34.xyz": self.rule34xyz, "saint": self.saint, "scrolller": self.scrolller,
                         "simpcity": self.simpcity, "socialmediagirls": self.socialmediagirls, "toonily": self.toonily, 
@@ -179,6 +179,11 @@ class ScrapeMapper:
         """Creates a PixelDrain Crawler instance"""
         from cyberdrop_dl.scraper.crawlers.pixeldrain_crawler import PixelDrainCrawler
         self.existing_crawlers['pixeldrain'] = PixelDrainCrawler(self.manager)
+        
+    async def pixeldrain_bypass(self) -> None:
+        """Creates a PixelDrain Bypass Crawler instance"""
+        from cyberdrop_dl.scraper.crawlers.pixeldrain_bypass_crawler import PixelDrainBypassCrawler
+        self.existing_crawlers['pd.cybar.xyz'] = PixelDrainBypassCrawler(self.manager)
 
     async def postimg(self) -> None:
         """Creates a PostImg Crawler instance"""

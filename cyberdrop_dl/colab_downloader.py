@@ -2,6 +2,7 @@ import asyncio
 import sys
 import traceback
 import time
+import re
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
@@ -129,15 +130,40 @@ class ColabDownloader:
                 # Only log if verbose logging is enabled
                 if self.verbose_logging:
                     self.force_print(f"Download completed: {Path(filename).name}")
+                
+                # Remove from active downloads
                 del self.active_downloads[task_id]
+                
+                # Remove from retry attempts if it was being retried
+                if task_id in self.retry_attempts:
+                    del self.retry_attempts[task_id]
+                
+                # Increment completed files counter
+                self.completed_files += 1
+            
             await original_mark_task_completed(task_id)
         
         async def new_advance_file(task_id, amount):
             try:
                 if task_id in self.active_downloads:
+                    # Store the previous completed amount for stall detection
+                    previous_completed = self.active_downloads[task_id].get("completed", 0)
+                    previous_update_time = self.active_downloads[task_id].get("last_update_time", time.time())
+                    
                     # Update the completed amount and last update time
                     self.active_downloads[task_id]["completed"] += amount
-                    self.active_downloads[task_id]["last_update_time"] = time.time()
+                    current_time = time.time()
+                    self.active_downloads[task_id]["last_update_time"] = current_time
+                    
+                    # Store progress information for stall detection
+                    self.active_downloads[task_id]["last_progress_amount"] = amount
+                    self.active_downloads[task_id]["last_progress_time"] = current_time
+                    
+                    # Calculate and store download speed
+                    time_diff = current_time - previous_update_time
+                    if time_diff > 0:
+                        speed = amount / time_diff
+                        self.active_downloads[task_id]["current_speed"] = speed
                     
                     # Only log progress for large files at major milestones if verbose logging is enabled
                     if self.verbose_logging:
@@ -205,15 +231,43 @@ class ColabDownloader:
                     stalled = []
                     
                     for task_id, download in active_downloads:
-                        last_update = download.get("last_update_time", download["start_time"])
-                        time_since_update = current_time - last_update
+                        # Check if download is complete
+                        completed = download.get("completed", 0)
+                        total = download.get("total", None)
+                        if total and completed >= total:
+                            # This download is complete, don't categorize it
+                            continue
+                            
+                        # Check for stalled downloads using the same logic as _check_stalled_downloads
+                        is_stalled = False
                         
-                        if time_since_update <= 10.0:  # Active in the last 10 seconds
-                            truly_active.append((task_id, download))
-                            active_count += 1
-                        elif time_since_update > self.stall_threshold:  # Stalled
+                        # 1. Check if there's been any progress update recently
+                        last_progress_time = download.get("last_progress_time", download.get("last_update_time", download["start_time"]))
+                        time_since_progress = current_time - last_progress_time
+                        
+                        # 2. Check if the download speed has dropped significantly
+                        current_speed = download.get("current_speed", 0)
+                        
+                        # 3. Check if we're near the end of the download
+                        near_completion = total and completed > 0.95 * total
+                        
+                        # Determine if the download is stalled based on these factors
+                        if time_since_progress > self.stall_threshold and not near_completion:
+                            is_stalled = True
+                            download["stall_reason"] = f"No progress for {time_since_progress:.1f}s"
+                        # Only consider slow downloads as stalled if they're really slow and have been that way for a while
+                        elif current_speed < 50 and time_since_progress > self.stall_threshold and not near_completion:
+                            # For large files (>100MB), be more lenient
+                            if not (total and total > 100*1024*1024 and completed < 0.5 * total):
+                                is_stalled = True
+                                download["stall_reason"] = f"Speed too low ({self._format_size(current_speed)}/s) for {time_since_progress:.1f}s"
+                        
+                        if is_stalled:
                             stalled.append((task_id, download))
                             stalled_count += 1
+                        elif time_since_progress <= 10.0:  # Active in the last 10 seconds
+                            truly_active.append((task_id, download))
+                            active_count += 1
                         else:  # In between - likely queued or slow
                             queued.append((task_id, download))
                             queued_count += 1
@@ -265,9 +319,20 @@ class ColabDownloader:
             
             if total:
                 percentage = (completed / total) * 100 if total > 0 else 0
+                
+                # If download is 100% complete, override the status indicator
+                if percentage >= 100:
+                    status_indicator = "✅"  # Checkmark for completed downloads
+                    is_stalled = False  # Don't show stalled message for completed downloads
+                
                 progress_bar = self._create_progress_bar(percentage)
                 elapsed = current_time - download["start_time"]
                 speed = completed / elapsed if elapsed > 0 else 0
+                
+                # Use current speed if available
+                current_speed = download.get("current_speed", 0)
+                if current_speed > 0:
+                    speed = current_speed
                 
                 # Format sizes
                 completed_str = self._format_size(completed)
@@ -276,21 +341,25 @@ class ColabDownloader:
                 
                 self.force_print(f"{status_indicator} {filename[:40]}... {progress_bar} {percentage:.1f}% | {completed_str}/{total_str} | {speed_str}")
                 if is_stalled:
-                    last_update = download.get("last_update_time", download["start_time"])
-                    time_since_update = current_time - last_update
-                    self.force_print(f"   Stalled for {time_since_update:.1f}s")
+                    stall_reason = download.get("stall_reason", "No recent progress")
+                    self.force_print(f"   Stalled: {stall_reason}")
             else:
                 # If total is None, just show the completed size
                 completed_str = self._format_size(completed)
                 elapsed = current_time - download["start_time"]
                 speed = completed / elapsed if elapsed > 0 else 0
+                
+                # Use current speed if available
+                current_speed = download.get("current_speed", 0)
+                if current_speed > 0:
+                    speed = current_speed
+                
                 speed_str = self._format_size(speed) + "/s"
                 
                 self.force_print(f"{status_indicator} {filename[:40]}... {completed_str} | {speed_str}")
                 if is_stalled:
-                    last_update = download.get("last_update_time", download["start_time"])
-                    time_since_update = current_time - last_update
-                    self.force_print(f"   Stalled for {time_since_update:.1f}s")
+                    stall_reason = download.get("stall_reason", "No recent progress")
+                    self.force_print(f"   Stalled: {stall_reason}")
         except Exception:
             pass
     
@@ -398,12 +467,62 @@ class ColabDownloader:
             stalled_downloads = []
             
             # Find downloads that haven't made progress in a while
-            for task_id, download in self.active_downloads.items():
-                last_update = download.get("last_update_time", download["start_time"])
-                time_since_update = current_time - last_update
+            for task_id, download in list(self.active_downloads.items()):
+                # First check if download is complete
+                completed = download.get("completed", 0)
+                total = download.get("total", None)
                 
-                # If a download hasn't made progress in stall_threshold seconds, consider it stalled
-                if time_since_update > self.stall_threshold:
+                if total and completed >= total:
+                    # This download is complete, schedule it for removal
+                    self.force_print(f"✅ Auto-completing download: {Path(download['filename']).name}")
+                    self.completed_files += 1
+                    await self._remove_completed_download(task_id)
+                    continue
+                
+                # Check if the download is stalled using multiple indicators
+                is_stalled = False
+                stall_reason = ""
+                
+                # 1. Check if there's been any progress update recently
+                last_progress_time = download.get("last_progress_time", download.get("last_update_time", download["start_time"]))
+                time_since_progress = current_time - last_progress_time
+                
+                # 2. Check if the download speed has dropped significantly
+                current_speed = download.get("current_speed", 0)
+                
+                # 3. Check if we're near the end of the download (sometimes servers slow down at the end)
+                near_completion = total and completed > 0.95 * total
+                
+                # Determine if the download is stalled based on these factors
+                if time_since_progress > self.stall_threshold and not near_completion:
+                    is_stalled = True
+                    download["stall_reason"] = f"No progress for {time_since_progress:.1f}s"
+                # Only consider slow downloads as stalled if they're really slow and have been that way for a while
+                elif current_speed < 50 and time_since_progress > self.stall_threshold and not near_completion:
+                    # For large files (>100MB), be more lenient
+                    if not (total and total > 100*1024*1024 and completed < 0.5 * total):
+                        is_stalled = True
+                        download["stall_reason"] = f"Speed too low ({self._format_size(current_speed)}/s) for {time_since_progress:.1f}s"
+                
+                # If the download is stalled, check if the file exists and is complete
+                if is_stalled:
+                    try:
+                        download_dir = await self.manager.path_manager.get_download_dir()
+                        filename = Path(download["filename"]).name
+                        potential_file = download_dir / filename
+                        
+                        if potential_file.exists():
+                            # If the file exists and is the expected size, mark it as complete
+                            if total and potential_file.stat().st_size >= total:
+                                self.force_print(f"✅ File exists and is complete: {filename}")
+                                self.completed_files += 1
+                                await self._remove_completed_download(task_id)
+                                continue
+                    except Exception:
+                        # If there's an error checking the file, just continue with stall detection
+                        pass
+                    
+                    # Add to stalled downloads with the reason
                     stalled_downloads.append(task_id)
             
             # Retry stalled downloads
@@ -449,6 +568,22 @@ class ColabDownloader:
             download = self.active_downloads[task_id]
             filename = Path(download["filename"]).name
             
+            # Check if the download is actually complete
+            completed = download.get("completed", 0)
+            total = download.get("total", None)
+            if total and completed >= total:
+                # This download is complete, don't retry it
+                self.force_print(f"✅ Download already complete for {filename}, removing from active downloads")
+                await self._remove_completed_download(task_id)
+                continue
+                
+            # Check if we're near the end of the download (sometimes servers slow down at the end)
+            near_completion = total and completed > 0.95 * total
+            if near_completion:
+                # Don't retry downloads that are almost complete
+                self.force_print(f"⏳ Download almost complete for {filename} ({completed/total:.1%}), not retrying")
+                continue
+            
             # Check if we've already retried this download too many times
             retry_count = self.retry_attempts.get(task_id, 0)
             if retry_count >= self.max_retries:
@@ -458,21 +593,47 @@ class ColabDownloader:
             # Increment retry count
             self.retry_attempts[task_id] = retry_count + 1
             
-            # Log the retry
+            # Log the retry with the stall reason
+            stall_reason = download.get("stall_reason", "Unknown reason")
             self.force_print(f"🔄 Retrying download for {filename} (attempt {retry_count + 1}/{self.max_retries})")
+            self.force_print(f"   Reason: {stall_reason}")
             
             try:
                 # Get the media item from the download
                 media_item = None
-                for domain, downloader in self.manager.download_manager._download_instances.items():
+                domain = None
+                
+                # Extract domain from the filename (format is typically "(DOMAIN) filename")
+                domain_match = re.match(r'\(([^)]+)\)', filename)
+                if domain_match:
+                    domain_str = domain_match.group(1).lower()
+                    # Map the display domain to the actual domain key used in _download_instances
+                    domain_map = {
+                        "pd.cybar.xyz": "pd.cybar.xyz",
+                        "pixeldrain": "pixeldrain",
+                        "no_crawler": "no_crawler"
+                    }
+                    domain = domain_map.get(domain_str, domain_str)
+                
+                # If we found a domain, look for the media item in that specific downloader
+                if domain and domain in self.manager.download_manager._download_instances:
+                    downloader = self.manager.download_manager._download_instances[domain]
                     for item in downloader.processed_items:
                         if hasattr(item, 'task_id') and item.task_id == task_id:
                             media_item = item
                             break
-                    if media_item:
-                        break
+                else:
+                    # Fall back to checking all downloaders
+                    for d, downloader in self.manager.download_manager._download_instances.items():
+                        for item in downloader.processed_items:
+                            if hasattr(item, 'task_id') and item.task_id == task_id:
+                                media_item = item
+                                domain = d
+                                break
+                        if media_item:
+                            break
                 
-                if media_item:
+                if media_item and domain:
                     # Reset the download
                     self.force_print(f"🔄 Restarting download for {filename}")
                     
@@ -484,9 +645,30 @@ class ColabDownloader:
                         self.manager.download_manager._download_instances[domain].download(media_item)
                     )
                 else:
-                    self.force_print(f"❌ Could not find media item for {filename}, cannot retry")
+                    # Check if the file already exists on disk (might have completed but not been marked)
+                    download_dir = await self.manager.path_manager.get_download_dir()
+                    potential_file = download_dir / Path(filename).name
+                    if potential_file.exists():
+                        self.force_print(f"✅ File already exists on disk for {filename}, marking as completed")
+                        await self._remove_completed_download(task_id)
+                    else:
+                        self.force_print(f"❌ Could not find media item for {filename}, cannot retry")
             except Exception as e:
                 self.force_print(f"❌ Error retrying download for {filename}: {e}")
+
+    async def _remove_completed_download(self, task_id: str) -> None:
+        """Remove a completed download from the active downloads list"""
+        if task_id in self.active_downloads:
+            # Small delay to ensure any pending updates are processed
+            await asyncio.sleep(1)
+            if task_id in self.active_downloads:
+                filename = Path(self.active_downloads[task_id]["filename"]).name
+                del self.active_downloads[task_id]
+                await log(f"Removed completed download {filename} from active downloads", 10)
+                
+                # Also remove from retry attempts if it was being retried
+                if task_id in self.retry_attempts:
+                    del self.retry_attempts[task_id]
 
     def _apply_download_limits(self) -> None:
         """Apply download limits to avoid overwhelming servers"""

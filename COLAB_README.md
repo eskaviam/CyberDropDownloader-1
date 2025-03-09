@@ -89,13 +89,22 @@ This helps you understand if your download limits are working correctly and iden
 
 ## Handling Stalled Downloads
 
-The Colab edition includes features to help identify and handle stalled downloads:
+The Colab edition includes intelligent stall detection to identify and handle downloads that aren't making progress:
 
-1. **Stalled Download Detection**: Downloads that haven't made progress for more than 10 seconds are marked as stalled
-2. **Visual Indicators**: Stalled downloads are marked with a warning emoji (⚠️)
-3. **Time Since Update**: For stalled downloads, the time since the last progress update is shown
-4. **Automatic Limits**: The downloader automatically limits concurrent downloads to prevent overwhelming servers
-5. **Stalled Download Warnings**: After 60 seconds of no progress, detailed warnings are shown with troubleshooting tips
+1. **Smart Stall Detection**: Downloads are only marked as stalled if they meet specific criteria:
+   - No progress for more than the stall threshold (default: 120 seconds)
+   - Download speed has dropped significantly
+   - Not near completion (downloads at >95% are not considered stalled)
+
+2. **Detailed Stall Information**: For stalled downloads, the specific reason is shown:
+   - "No progress for X seconds"
+   - "Speed too low (X/s) for Y seconds"
+
+3. **Automatic Retry**: Stalled downloads are automatically retried up to a configurable number of times
+
+4. **Visual Indicators**: Stalled downloads are marked with a warning emoji (⚠️)
+
+5. **Intelligent Handling**: Downloads that are almost complete (>95%) are not retried even if they appear stalled
 
 ### Controlling Download Limits
 
