@@ -38,14 +38,17 @@ def limiter(func):
     async def wrapper(self, *args, **kwargs):
         domain_limiter = await self.client_manager.get_rate_limiter(args[0])
         await asyncio.sleep(await self.client_manager.get_downloader_spacer(args[0]))
-        await self._global_limiter.acquire()
-        await domain_limiter.acquire()
+        
+        # Use the download_session_limit to enforce the maximum number of concurrent downloads
+        async with self.client_manager.download_session_limit:
+            await self._global_limiter.acquire()
+            await domain_limiter.acquire()
 
-        async with aiohttp.ClientSession(headers=self._headers, raise_for_status=False,
-                                         cookie_jar=self.client_manager.cookies, timeout=self._timeouts,
-                                         trace_configs=self.trace_configs) as client:
-            kwargs['client_session'] = client
-            return await func(self, *args, **kwargs)
+            async with aiohttp.ClientSession(headers=self._headers, raise_for_status=False,
+                                            cookie_jar=self.client_manager.cookies, timeout=self._timeouts,
+                                            trace_configs=self.trace_configs) as client:
+                kwargs['client_session'] = client
+                return await func(self, *args, **kwargs)
     return wrapper
 
 

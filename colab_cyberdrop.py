@@ -18,6 +18,12 @@ def run_downloader(
     skip_hosts: Optional[List[str]] = None,
     only_hosts: Optional[List[str]] = None,
     output_folder: str = "./downloads",
+    max_downloads: int = 15,
+    max_per_domain: int = 5,
+    verbose: bool = False,
+    ignore_history: bool = False,
+    stall_threshold: int = 300,
+    max_retries: int = 3,
     additional_args: Optional[Dict[str, Any]] = None
 ) -> None:
     """
@@ -29,6 +35,12 @@ def run_downloader(
         skip_hosts: List of hosts to skip
         only_hosts: List of hosts to only include
         output_folder: Path to where you want to save downloads
+        max_downloads: Maximum number of concurrent downloads (default: 15)
+        max_per_domain: Maximum number of concurrent downloads per domain (default: 5)
+        verbose: Whether to enable verbose logging (default: False)
+        ignore_history: Whether to ignore download history (default: False)
+        stall_threshold: Time in seconds before considering a download stalled (default: 300)
+        max_retries: Maximum number of retries for stalled downloads (default: 3)
         additional_args: Additional arguments to pass to cyberdrop-dl
     """
     # Build the command
@@ -39,6 +51,22 @@ def run_downloader(
         cmd.append("--block-download-sub-folders")
     
     cmd.extend(["--output-folder", output_folder])
+    
+    # Add download limits
+    cmd.extend(["--max-simultaneous-downloads", str(max_downloads)])
+    cmd.extend(["--max-simultaneous-downloads-per-domain", str(max_per_domain)])
+    
+    # Add verbose flag if requested
+    if verbose:
+        cmd.append("--verbose")
+        
+    # Add ignore_history flag if requested
+    if ignore_history:
+        cmd.append("--ignore-history")
+        
+    # Add stall threshold and max retries
+    cmd.extend(["--stall-threshold", str(stall_threshold)])
+    cmd.extend(["--max-retries", str(max_retries)])
     
     # Add skip hosts
     if skip_hosts:
@@ -76,6 +104,12 @@ def parse_args():
     parser.add_argument("--skip-hosts", action="append", help="skip these domains when scraping", default=[])
     parser.add_argument("--only-hosts", action="append", help="only scrape these domains", default=[])
     parser.add_argument("--output-folder", type=str, help="path to where you want to save downloads", default="./downloads")
+    parser.add_argument("--max-downloads", type=int, help="maximum number of concurrent downloads", default=15)
+    parser.add_argument("--max-per-domain", type=int, help="maximum number of concurrent downloads per domain", default=5)
+    parser.add_argument("--verbose", action="store_true", help="enable verbose logging", default=False)
+    parser.add_argument("--ignore-history", action="store_true", help="ignore download history", default=False)
+    parser.add_argument("--stall-threshold", type=int, help="time in seconds before considering a download stalled", default=300)
+    parser.add_argument("--max-retries", type=int, help="maximum number of retries for stalled downloads", default=3)
     parser.add_argument("links", nargs="*", help="links to download")
     return parser.parse_args()
 
@@ -94,6 +128,22 @@ def main():
         cmd.append("--block-download-sub-folders")
     if args.output_folder:
         cmd.extend(["--output-folder", args.output_folder])
+    
+    # Add download limits
+    cmd.extend(["--max-simultaneous-downloads", str(args.max_downloads)])
+    cmd.extend(["--max-simultaneous-downloads-per-domain", str(args.max_per_domain)])
+    
+    # Add verbose flag if requested
+    if args.verbose:
+        cmd.append("--verbose")
+        
+    # Add ignore_history flag if requested
+    if args.ignore_history:
+        cmd.append("--ignore-history")
+        
+    # Add stall threshold and max retries
+    cmd.extend(["--stall-threshold", str(args.stall_threshold)])
+    cmd.extend(["--max-retries", str(args.max_retries)])
     
     # Add skip hosts
     for host in args.skip_hosts:

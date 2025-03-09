@@ -74,12 +74,21 @@ class Manager:
 
         if not isinstance(self.db_manager, DBManager):
             self.db_manager = DBManager(self, self.path_manager.history_db)
-            self.db_manager.ignore_history = self.config_manager.settings_data['Runtime_Options']['ignore_history']
+            if self.args_manager.ignore_history:
+                self.db_manager.ignore_history = True
+            else:
+                self.db_manager.ignore_history = self.config_manager.settings_data['Runtime_Options']['ignore_history']
             await self.db_manager.startup()
+            
         if not isinstance(self.client_manager, ClientManager):
             self.client_manager = ClientManager(self)
+            # Ensure the download_session_limit is set correctly
+            max_downloads = self.config_manager.global_settings_data['Rate_Limiting_Options']['max_simultaneous_downloads']
+            self.client_manager.download_session_limit = asyncio.Semaphore(max_downloads)
+            
         if not isinstance(self.download_manager, DownloadManager):
             self.download_manager = DownloadManager(self)
+            
         self.progress_manager = ProgressManager(self)
         await self.progress_manager.startup()
 
@@ -90,6 +99,18 @@ class Manager:
 
     async def args_consolidation(self) -> None:
         """Consolidates runtime arguments with config values"""
+        # Apply command-line overrides for max_simultaneous_downloads and max_simultaneous_downloads_per_domain
+        if self.args_manager.max_simultaneous_downloads is not None:
+            self.config_manager.global_settings_data['Rate_Limiting_Options']['max_simultaneous_downloads'] = self.args_manager.max_simultaneous_downloads
+            
+            # If client_manager is already initialized, update its download_session_limit
+            if hasattr(self, 'client_manager') and isinstance(self.client_manager, ClientManager):
+                self.client_manager.download_session_limit = asyncio.Semaphore(self.args_manager.max_simultaneous_downloads)
+            
+        if self.args_manager.max_simultaneous_downloads_per_domain is not None:
+            self.config_manager.global_settings_data['Rate_Limiting_Options']['max_simultaneous_downloads_per_domain'] = self.args_manager.max_simultaneous_downloads_per_domain
+            
+        # Process other arguments
         for arg in self.args_manager.parsed_args:
             if arg in config_definitions.settings['Download_Options']:
                 if self.args_manager.parsed_args[arg] != config_definitions.settings['Download_Options'][arg]:

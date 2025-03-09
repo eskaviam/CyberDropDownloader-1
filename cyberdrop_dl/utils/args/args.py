@@ -70,6 +70,11 @@ def parse_args() -> argparse.Namespace:
     runtime_options.add_argument("--send-unsupported-to-jdownloader", action="store_true", help="send unsupported urls to jdownloader", default=False)
     runtime_options.add_argument("--update-last-forum-post", action="store_true", help="update the last forum post", default=False)
     runtime_options.add_argument("--colab-mode", action="store_true", help="use Colab-friendly progress display without rich UI", default=False)
+    runtime_options.add_argument("--verbose", action="store_true", help="enable verbose logging in colab mode", default=False)
+    runtime_options.add_argument("--stall-threshold", type=int, help="time in seconds before considering a download stalled", default=300)
+    runtime_options.add_argument("--max-retries", type=int, help="maximum number of retries for stalled downloads", default=3)
+    runtime_options.add_argument("--max-simultaneous-downloads", type=int, help="maximum number of concurrent downloads", default=15)
+    runtime_options.add_argument("--max-simultaneous-downloads-per-domain", type=int, help="maximum number of concurrent downloads per domain", default=5)
 
     sorting_options = parser.add_argument_group("Sorting")
     sorting_options.add_argument("--sort-downloads", action="store_true", help="sort downloads into folders", default=False)

@@ -163,6 +163,9 @@ def main():
                 # Use the Colab downloader
                 downloader = ColabDownloader()
                 downloader.manager = manager
+                downloader.verbose_logging = manager.args_manager.verbose
+                downloader.stall_threshold = manager.args_manager.stall_threshold
+                downloader.max_retries = manager.args_manager.max_retries
                 asyncio.run(downloader.director())
             else:
                 # Use the standard downloader

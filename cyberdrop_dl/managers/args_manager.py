@@ -23,6 +23,12 @@ class ArgsManager:
         self.load_config_name = ""
         self.other_links: list = []
         self.colab_mode = False
+        self.verbose = False
+        self.ignore_history = False
+        self.stall_threshold = 300
+        self.max_retries = 3
+        self.max_simultaneous_downloads = None
+        self.max_simultaneous_downloads_per_domain = None
 
         # Files
         self.input_file = None
@@ -64,6 +70,24 @@ class ArgsManager:
             self.immediate_download = True
             self.no_ui = True
             self.colab_mode = True
+            
+        if self.parsed_args['verbose']:
+            self.verbose = True
+
+        if self.parsed_args['ignore_history']:
+            self.ignore_history = True
+
+        if self.parsed_args['stall_threshold']:
+            self.stall_threshold = self.parsed_args['stall_threshold']
+            
+        if self.parsed_args['max_retries']:
+            self.max_retries = self.parsed_args['max_retries']
+
+        if self.parsed_args['max_simultaneous_downloads']:
+            self.max_simultaneous_downloads = self.parsed_args['max_simultaneous_downloads']
+            
+        if self.parsed_args['max_simultaneous_downloads_per_domain']:
+            self.max_simultaneous_downloads_per_domain = self.parsed_args['max_simultaneous_downloads_per_domain']
 
         if self.load_config_name:
             self.load_config_from_args = True
@@ -130,3 +154,9 @@ class ArgsManager:
         del self.parsed_args['sort_downloads']
         del self.parsed_args['sort_folder']
         del self.parsed_args['colab_mode']
+        del self.parsed_args['verbose']
+        del self.parsed_args['ignore_history']
+        del self.parsed_args['stall_threshold']
+        del self.parsed_args['max_retries']
+        del self.parsed_args['max_simultaneous_downloads']
+        del self.parsed_args['max_simultaneous_downloads_per_domain']
