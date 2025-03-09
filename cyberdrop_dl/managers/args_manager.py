@@ -22,6 +22,7 @@ class ArgsManager:
         self.load_config_from_args = False
         self.load_config_name = ""
         self.other_links: list = []
+        self.colab_mode = False
 
         # Files
         self.input_file = None
@@ -58,6 +59,11 @@ class ArgsManager:
         if self.parsed_args['no_ui']:
             self.immediate_download = True
             self.no_ui = True
+
+        if self.parsed_args['colab_mode']:
+            self.immediate_download = True
+            self.no_ui = True
+            self.colab_mode = True
 
         if self.load_config_name:
             self.load_config_from_args = True
@@ -123,3 +129,4 @@ class ArgsManager:
         del self.parsed_args['links']
         del self.parsed_args['sort_downloads']
         del self.parsed_args['sort_folder']
+        del self.parsed_args['colab_mode']

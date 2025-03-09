@@ -12,6 +12,7 @@ from cyberdrop_dl.scraper.scraper import ScrapeMapper
 from cyberdrop_dl.ui.ui import program_ui
 from cyberdrop_dl.utils.sorting import Sorter
 from cyberdrop_dl.utils.utilities import check_latest_pypi, log_with_color, check_partials_and_empty_folders, log
+from cyberdrop_dl.colab_downloader import ColabDownloader
 
 
 def startup() -> Manager:
@@ -158,7 +159,14 @@ def main():
     asyncio.set_event_loop(loop)
     with contextlib.suppress(RuntimeError):
         try:
-            asyncio.run(director(manager))
+            if manager.args_manager.colab_mode:
+                # Use the Colab downloader
+                downloader = ColabDownloader()
+                downloader.manager = manager
+                asyncio.run(downloader.director())
+            else:
+                # Use the standard downloader
+                asyncio.run(director(manager))
         except KeyboardInterrupt:
             print("\nTrying to Exit...")
             with contextlib.suppress(Exception):
