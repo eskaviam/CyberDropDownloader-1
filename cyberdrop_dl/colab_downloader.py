@@ -250,6 +250,11 @@ class ColabDownloader:
                         speed = amount / time_diff
                         self.active_downloads[task_id]["current_speed"] = speed
                     
+                    # Debug logging for download progress
+                    if self.active_downloads[task_id]["completed"] == amount:  # First progress update
+                        filename = Path(self.active_downloads[task_id]["filename"]).name
+                        self.force_print(f"🔄 Download started: {filename} - received first {self._format_size(amount)} of data")
+                    
                     # Only log progress for large files at major milestones if verbose logging is enabled
                     if self.verbose_logging:
                         completed = self.active_downloads[task_id]["completed"]
@@ -1174,6 +1179,9 @@ class ColabDownloader:
                             self.active_domain_counts[domain] = 0
                         self.active_domain_counts[domain] += 1
                         
+                        # Start the actual download
+                        await self._start_download_from_queue(file, domain, task_id, expected_size)
+                        
                         # Small delay between starting downloads
                         await asyncio.sleep(0.5)
                     
@@ -1240,28 +1248,46 @@ class ColabDownloader:
                         # Start the download
                         self.force_print(f"Starting queued download: {file}")
                         
-                        # Create a new task for the download
-                        if original_task:
-                            self.manager.task_group.create_task(original_task)
-                        else:
-                            # If no original task, create a new one using the file info
-                            if not task_id:
-                                task_id = await self.manager.progress_manager.file_progress.add_task(file, expected_size)
-                            
-                            self.active_downloads[task_id] = {
-                                "filename": file,
-                                "total": expected_size,
-                                "completed": 0,
-                                "start_time": time.time(),
-                                "last_update_time": time.time(),
-                                "domain": domain
-                            }
-                            
-                            # Update domain counts
-                            if domain:
-                                if domain not in self.active_domain_counts:
-                                    self.active_domain_counts[domain] = 0
-                                self.active_domain_counts[domain] += 1
+                        try:
+                            # Create a new task for the download
+                            if original_task:
+                                self.force_print(f"Creating task from original task for {file}")
+                                self.manager.task_group.create_task(original_task)
+                            else:
+                                # If no original task, create a new one using the file info
+                                if not task_id:
+                                    self.force_print(f"Creating new task ID for {file}")
+                                    task_id = await self.manager.progress_manager.file_progress.add_task(file, expected_size)
+                                
+                                self.active_downloads[task_id] = {
+                                    "filename": file,
+                                    "total": expected_size,
+                                    "completed": 0,
+                                    "start_time": time.time(),
+                                    "last_update_time": time.time(),
+                                    "domain": domain
+                                }
+                                
+                                # Update domain counts
+                                if domain:
+                                    if domain not in self.active_domain_counts:
+                                        self.active_domain_counts[domain] = 0
+                                    self.active_domain_counts[domain] += 1
+                                
+                                # Start the actual download
+                                await self._start_download_from_queue(file, domain, task_id, expected_size)
+                                
+                                # Debug: Check if the file exists in the download directory
+                                try:
+                                    download_dir = await self.manager.path_manager.get_download_dir()
+                                    potential_file = download_dir / Path(file).name
+                                    if potential_file.exists():
+                                        self.force_print(f"⚠️ Warning: File already exists: {potential_file}")
+                                except Exception as e:
+                                    self.force_print(f"Error checking file existence: {e}")
+                        except Exception as e:
+                            self.force_print(f"Error starting download: {e}")
+                            traceback.print_exc()
                         
                         queue_processed += 1
                         
@@ -1274,8 +1300,82 @@ class ColabDownloader:
                 await asyncio.sleep(5)
             except Exception as e:
                 self.force_print(f"Error in queue processor: {e}")
+                traceback.print_exc()
                 self.is_processing_queue = False
                 await asyncio.sleep(5)
+
+    async def _start_download_from_queue(self, file, domain, task_id=None, expected_size=None):
+        """Start a download from the queue"""
+        try:
+            # Create a URL object from the file path
+            # The file path format is typically "(DOMAIN) filename"
+            # We need to extract the actual URL from this
+            
+            # Debug information
+            self.force_print(f"Starting download for {file} (domain: {domain})")
+            
+            # Create a MediaItem for the download
+            from cyberdrop_dl.utils.dataclasses.url_objects import MediaItem
+            from yarl import URL
+            
+            # Try to find the URL in the original scrape items
+            url = None
+            for scraper in self.manager.scraper.existing_crawlers.values():
+                for item in scraper.processed_items:
+                    if hasattr(item, 'filename') and item.filename == file:
+                        url = item.url
+                        break
+                if url:
+                    break
+            
+            # If we couldn't find the URL, create a dummy one
+            if not url:
+                # For no_crawler domain, the file is likely a direct URL
+                if domain == "no_crawler":
+                    # Try to extract the URL from the filename
+                    # The format might be something like "(NO_CRAWLER) https://example.com/image.jpg"
+                    file_parts = file.split(" ", 1)
+                    if len(file_parts) > 1 and file_parts[1].startswith("http"):
+                        url = URL(file_parts[1])
+                    else:
+                        # Create a dummy URL
+                        url = URL(f"https://example.com/{Path(file).name}")
+                else:
+                    # Create a dummy URL for other domains
+                    url = URL(f"https://{domain}.com/{Path(file).name}")
+            
+            # Create a MediaItem
+            download_dir = await self.manager.path_manager.get_download_dir()
+            media_item = MediaItem(
+                url=url,
+                referer=url,
+                filename=Path(file).name,
+                download_folder=download_dir,
+                parent_title="",
+                date=int(time.time())
+            )
+            
+            # Set the task_id if provided
+            if task_id:
+                media_item.task_id = task_id
+            
+            # Start the download
+            if domain in self.manager.download_manager._download_instances:
+                self.force_print(f"Starting download using {domain} downloader")
+                self.manager.task_group.create_task(
+                    self.manager.download_manager._download_instances[domain].download(media_item)
+                )
+            else:
+                self.force_print(f"Starting download using no_crawler downloader")
+                self.manager.task_group.create_task(
+                    self.manager.download_manager._download_instances["no_crawler"].download(media_item)
+                )
+            
+            return True
+        except Exception as e:
+            self.force_print(f"Error starting download: {e}")
+            traceback.print_exc()
+            return False
 
 
 def main():
