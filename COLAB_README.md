@@ -144,6 +144,9 @@ The downloader now includes automatic limit enforcement to prevent issues:
 8. **Smart Queue Processing**: When downloads complete, queued downloads are automatically started
 9. **Dynamic Domain Limits**: Domain limits are temporarily increased when global capacity is available
 10. **Domain-Specific Queues**: The system tracks queued downloads by domain and prioritizes accordingly
+11. **Persistent Temporary Limits**: Once a domain limit is increased, it stays increased until the program ends
+12. **Balanced Distribution**: Available capacity is distributed among domains with queued downloads
+13. **Progressive Limit Increases**: Domain limits are increased gradually to prevent overwhelming servers
 
 This ensures that even if many downloads are queued, the system will remain stable and responsive.
 
