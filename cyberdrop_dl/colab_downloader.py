@@ -598,8 +598,7 @@ class ColabDownloader:
                 # If the download is stalled, check if the file exists and is complete
                 if is_stalled:
                     try:
-                        import os
-                        download_dir = os.path.join(self.manager.args.download_directory, "Downloads")
+                        download_dir = self.manager.path_manager.download_dir
                         filename = Path(download["filename"]).name
                         potential_file = Path(download_dir) / filename
                         
@@ -738,8 +737,7 @@ class ColabDownloader:
                     )
                 else:
                     # Check if the file already exists on disk (might have completed but not been marked)
-                    import os
-                    download_dir = os.path.join(self.manager.args.download_directory, "Downloads")
+                    download_dir = self.manager.path_manager.download_dir
                     potential_file = Path(download_dir) / Path(filename).name
                     if potential_file.exists():
                         self.force_print(f"✅ File already exists on disk for {filename}, marking as completed")
@@ -1282,7 +1280,7 @@ class ColabDownloader:
                                 
                                 # Debug: Check if the file exists in the download directory
                                 try:
-                                    download_dir = os.path.join(self.manager.args.download_directory, "Downloads")
+                                    download_dir = self.manager.path_manager.download_dir
                                     potential_file = Path(download_dir) / Path(file).name
                                     if potential_file.exists():
                                         self.force_print(f"⚠️ Warning: File already exists: {potential_file}")
@@ -1316,6 +1314,8 @@ class ColabDownloader:
             # Create a MediaItem for the download
             from cyberdrop_dl.utils.dataclasses.url_objects import MediaItem
             from yarl import URL
+            import os
+            from pathlib import Path
             
             # Extract the filename from the file path
             filename = Path(file).name
@@ -1338,8 +1338,7 @@ class ColabDownloader:
                 url = URL(f"https://{domain}.com/{filename}")
             
             # Determine the download directory
-            download_dir = os.path.join(self.manager.args.download_directory, "Downloads")
-            os.makedirs(download_dir, exist_ok=True)
+            download_dir = self.manager.path_manager.download_dir
             
             # Create a MediaItem
             media_item = MediaItem(
