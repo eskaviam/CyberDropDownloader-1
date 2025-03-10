@@ -152,7 +152,7 @@ class ColabDownloader:
             
             if at_global_limit or at_domain_limit:
                 # We're at a limit, queue this download instead of starting it immediately
-                if self.verbose_logging:
+                if self.verbose_logging or len(self.download_queue) % 10 == 0:  # Log every 10th queued download
                     if at_global_limit:
                         self.force_print(f"Queuing download (global limit reached): {file}")
                     else:
@@ -947,6 +947,18 @@ class ColabDownloader:
                             
                             # Increment failed count
                             self.failed_files += 1
+                            
+                            # Re-queue the download if it wasn't complete
+                            completed = download.get("completed", 0)
+                            total = download.get("total", None)
+                            if not (total and completed >= total * 0.95):  # Don't re-queue if >95% complete
+                                self.download_queue.append({
+                                    "file": download["filename"],
+                                    "expected_size": download.get("total"),
+                                    "domain": download.get("domain"),
+                                    "task_id": None  # Create a new task ID when processing
+                                })
+                                self.force_print(f"Re-queued download: {filename}")
                 
                 # Check if any domain is exceeding its limit
                 for domain, count in list(self.active_domain_counts.items()):
@@ -978,10 +990,24 @@ class ColabDownloader:
                                 
                                 # Increment failed count
                                 self.failed_files += 1
+                                
+                                # Re-queue the download if it wasn't complete
+                                completed = download.get("completed", 0)
+                                total = download.get("total", None)
+                                if not (total and completed >= total * 0.95):  # Don't re-queue if >95% complete
+                                    self.download_queue.append({
+                                        "file": download["filename"],
+                                        "expected_size": download.get("total"),
+                                        "domain": download.get("domain"),
+                                        "task_id": None  # Create a new task ID when processing
+                                    })
+                                    self.force_print(f"Re-queued download: {filename}")
                 
                 # Process the download queue to start new downloads if possible
-                if self.download_queue:
-                    await self._process_download_queue()
+                if self.download_queue and not self.is_processing_queue:
+                    # Trigger queue processing
+                    self.force_print(f"Queue has {len(self.download_queue)} items, triggering queue processing")
+                    asyncio.create_task(self._process_download_queue())
             
             except Exception as e:
                 self.force_print(f"Error in limit enforcer: {e}")
@@ -991,68 +1017,98 @@ class ColabDownloader:
 
     async def _process_download_queue(self) -> None:
         """Process the download queue, respecting download limits"""
-        if self.is_processing_queue:
-            return
-            
-        self.is_processing_queue = True
+        # Wait a bit before starting to process the queue
+        await asyncio.sleep(5)
         
-        try:
-            # Process queue until empty
-            while self.download_queue:
-                # Check if we're at the global limit
-                if len(self.active_downloads) >= self.current_download_limit:
-                    # We're at the limit, stop processing the queue
-                    break
-                
-                # Get the next item from the queue
-                item = self.download_queue[0]
-                domain = item.get("domain")
-                file = item.get("file")
-                expected_size = item.get("expected_size")
-                original_task = item.get("original_task")
-                
-                # Check domain limits
-                if domain:
-                    domain_count = self.active_domain_counts.get(domain, 0)
-                    if domain_count >= self.current_domain_limit:
-                        # This domain is at its limit, try the next item
-                        # Move this item to the end of the queue
-                        self.download_queue.append(self.download_queue.pop(0))
-                        
-                        # If we've gone through the entire queue without finding a suitable item, stop
-                        if len(self.download_queue) <= 1:
-                            break
-                            
-                        continue
-                
-                # Remove the item from the queue
-                self.download_queue.pop(0)
-                
-                # Start the download
-                self.force_print(f"Starting queued download: {file}")
-                
-                # Create a new task for the download
-                if original_task:
-                    self.manager.task_group.create_task(original_task)
-                else:
-                    # If no original task, create a new one using the file info
-                    task_id = await self.manager.progress_manager.file_progress.add_task(file, expected_size)
-                    self.active_downloads[task_id] = {
-                        "filename": file,
-                        "total": expected_size,
-                        "completed": 0,
-                        "start_time": time.time(),
-                        "last_update_time": time.time(),
-                        "domain": domain
-                    }
+        while True:
+            try:
+                if self.is_processing_queue:
+                    await asyncio.sleep(1)
+                    continue
                     
-                    # Update domain counts
-                    if domain:
-                        if domain not in self.active_domain_counts:
-                            self.active_domain_counts[domain] = 0
-                        self.active_domain_counts[domain] += 1
-        finally:
-            self.is_processing_queue = False
+                self.is_processing_queue = True
+                
+                try:
+                    # Process queue until empty or at limits
+                    queue_processed = 0
+                    queue_size = len(self.download_queue)
+                    
+                    if queue_size > 0:
+                        self.force_print(f"Processing download queue ({queue_size} items waiting)")
+                    
+                    while self.download_queue:
+                        # Check if we're at the global limit
+                        if len(self.active_downloads) >= self.current_download_limit:
+                            # We're at the limit, stop processing the queue
+                            self.force_print(f"Global download limit reached ({len(self.active_downloads)}/{self.current_download_limit}), pausing queue processing")
+                            break
+                        
+                        # Get the next item from the queue
+                        item = self.download_queue[0]
+                        domain = item.get("domain")
+                        file = item.get("file")
+                        expected_size = item.get("expected_size")
+                        original_task = item.get("original_task")
+                        task_id = item.get("task_id")
+                        
+                        # Check domain limits
+                        if domain:
+                            domain_count = self.active_domain_counts.get(domain, 0)
+                            if domain_count >= self.current_domain_limit:
+                                # This domain is at its limit, try the next item
+                                # Move this item to the end of the queue
+                                self.download_queue.append(self.download_queue.pop(0))
+                                
+                                # If we've gone through the entire queue without finding a suitable item, stop
+                                if len(self.download_queue) <= 1 or queue_processed >= queue_size:
+                                    self.force_print(f"Domain limit reached for all queued downloads, pausing queue processing")
+                                    break
+                                    
+                                queue_processed += 1
+                                continue
+                        
+                        # Remove the item from the queue
+                        self.download_queue.pop(0)
+                        
+                        # Start the download
+                        self.force_print(f"Starting queued download: {file}")
+                        
+                        # Create a new task for the download
+                        if original_task:
+                            self.manager.task_group.create_task(original_task)
+                        else:
+                            # If no original task, create a new one using the file info
+                            if not task_id:
+                                task_id = await self.manager.progress_manager.file_progress.add_task(file, expected_size)
+                            
+                            self.active_downloads[task_id] = {
+                                "filename": file,
+                                "total": expected_size,
+                                "completed": 0,
+                                "start_time": time.time(),
+                                "last_update_time": time.time(),
+                                "domain": domain
+                            }
+                            
+                            # Update domain counts
+                            if domain:
+                                if domain not in self.active_domain_counts:
+                                    self.active_domain_counts[domain] = 0
+                                self.active_domain_counts[domain] += 1
+                        
+                        queue_processed += 1
+                        
+                        # Small delay between starting downloads to avoid overwhelming the system
+                        await asyncio.sleep(0.5)
+                finally:
+                    self.is_processing_queue = False
+                
+                # Check the queue every 5 seconds
+                await asyncio.sleep(5)
+            except Exception as e:
+                self.force_print(f"Error in queue processor: {e}")
+                self.is_processing_queue = False
+                await asyncio.sleep(5)
 
 
 def main():
