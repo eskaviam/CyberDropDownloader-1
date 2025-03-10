@@ -142,6 +142,8 @@ The downloader now includes automatic limit enforcement to prevent issues:
 6. **Download Queue**: New downloads are automatically queued when limits are reached
 7. **Aggressive Enforcement**: The system aggressively enforces limits to prevent crashes
 8. **Smart Queue Processing**: When downloads complete, queued downloads are automatically started
+9. **Dynamic Domain Limits**: Domain limits are temporarily increased when global capacity is available
+10. **Domain-Specific Queues**: The system tracks queued downloads by domain and prioritizes accordingly
 
 This ensures that even if many downloads are queued, the system will remain stable and responsive.
 
