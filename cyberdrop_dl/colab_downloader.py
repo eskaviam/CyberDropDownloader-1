@@ -1340,14 +1340,20 @@ class ColabDownloader:
             # Determine the download directory
             download_dir = self.manager.path_manager.download_dir
             
-            # Create a MediaItem
+            # Get file extension
+            ext = os.path.splitext(filename)[1].lstrip('.')
+            if not ext:
+                ext = "jpg"  # Default extension if none is found
+            
+            # Create a MediaItem with the correct parameters
             media_item = MediaItem(
                 url=url,
                 referer=url,
-                filename=filename,
+                album_id=None,
                 download_folder=download_dir,
-                parent_title="",
-                date=int(time.time())
+                filename=filename,
+                ext=ext,
+                original_filename=filename
             )
             
             # Set the task_id if provided
