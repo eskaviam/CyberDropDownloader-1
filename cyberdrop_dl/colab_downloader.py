@@ -1364,13 +1364,19 @@ class ColabDownloader:
             from cyberdrop_dl.downloader.downloader import Downloader
             
             # Create a downloader instance if needed
-            if not hasattr(self, 'downloader_instance'):
-                self.downloader_instance = Downloader(self.manager)
+            if not hasattr(self, 'downloader_instances'):
+                self.downloader_instances = {}
+                
+            # Create or get a downloader for this domain
+            if domain not in self.downloader_instances:
+                self.downloader_instances[domain] = Downloader(self.manager, domain)
+                # Initialize the downloader
+                await self.downloader_instances[domain].startup()
                 
             # Start the download
             self.force_print(f"Starting download for {filename}")
             self.manager.task_group.create_task(
-                self.downloader_instance.download(media_item)
+                self.downloader_instances[domain].download(media_item)
             )
             
             return True
