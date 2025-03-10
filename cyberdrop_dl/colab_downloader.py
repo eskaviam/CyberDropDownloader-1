@@ -5,6 +5,7 @@ import time
 import re
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+import os
 
 from cyberdrop_dl.managers.manager import Manager
 from cyberdrop_dl.scraper.scraper import ScrapeMapper
@@ -597,9 +598,10 @@ class ColabDownloader:
                 # If the download is stalled, check if the file exists and is complete
                 if is_stalled:
                     try:
-                        download_dir = await self.manager.path_manager.get_download_dir()
+                        import os
+                        download_dir = os.path.join(self.manager.args.download_directory, "Downloads")
                         filename = Path(download["filename"]).name
-                        potential_file = download_dir / filename
+                        potential_file = Path(download_dir) / filename
                         
                         if potential_file.exists():
                             # If the file exists and is the expected size, mark it as complete
@@ -736,8 +738,9 @@ class ColabDownloader:
                     )
                 else:
                     # Check if the file already exists on disk (might have completed but not been marked)
-                    download_dir = await self.manager.path_manager.get_download_dir()
-                    potential_file = download_dir / Path(filename).name
+                    import os
+                    download_dir = os.path.join(self.manager.args.download_directory, "Downloads")
+                    potential_file = Path(download_dir) / Path(filename).name
                     if potential_file.exists():
                         self.force_print(f"✅ File already exists on disk for {filename}, marking as completed")
                         await self._remove_completed_download(task_id)
@@ -1279,8 +1282,8 @@ class ColabDownloader:
                                 
                                 # Debug: Check if the file exists in the download directory
                                 try:
-                                    download_dir = await self.manager.path_manager.get_download_dir()
-                                    potential_file = download_dir / Path(file).name
+                                    download_dir = os.path.join(self.manager.args.download_directory, "Downloads")
+                                    potential_file = Path(download_dir) / Path(file).name
                                     if potential_file.exists():
                                         self.force_print(f"⚠️ Warning: File already exists: {potential_file}")
                                 except Exception as e:
@@ -1307,10 +1310,6 @@ class ColabDownloader:
     async def _start_download_from_queue(self, file, domain, task_id=None, expected_size=None):
         """Start a download from the queue"""
         try:
-            # Create a URL object from the file path
-            # The file path format is typically "(DOMAIN) filename"
-            # We need to extract the actual URL from this
-            
             # Debug information
             self.force_print(f"Starting download for {file} (domain: {domain})")
             
@@ -1318,38 +1317,35 @@ class ColabDownloader:
             from cyberdrop_dl.utils.dataclasses.url_objects import MediaItem
             from yarl import URL
             
-            # Try to find the URL in the original scrape items
-            url = None
-            for scraper in self.manager.scraper.existing_crawlers.values():
-                for item in scraper.processed_items:
-                    if hasattr(item, 'filename') and item.filename == file:
-                        url = item.url
-                        break
-                if url:
-                    break
+            # Extract the filename from the file path
+            filename = Path(file).name
+            if "(" in file and ")" in file:
+                # Try to extract just the filename part after the domain
+                parts = file.split(")", 1)
+                if len(parts) > 1:
+                    filename = parts[1].strip()
             
-            # If we couldn't find the URL, create a dummy one
-            if not url:
-                # For no_crawler domain, the file is likely a direct URL
-                if domain == "no_crawler":
-                    # Try to extract the URL from the filename
-                    # The format might be something like "(NO_CRAWLER) https://example.com/image.jpg"
-                    file_parts = file.split(" ", 1)
-                    if len(file_parts) > 1 and file_parts[1].startswith("http"):
-                        url = URL(file_parts[1])
-                    else:
-                        # Create a dummy URL
-                        url = URL(f"https://example.com/{Path(file).name}")
+            # Create a URL based on the domain and filename
+            if domain == "no_crawler":
+                # For no_crawler domain, check if the filename might be a URL
+                if " http" in file:
+                    url_part = file.split(" http", 1)[1]
+                    url = URL(f"http{url_part}")
                 else:
-                    # Create a dummy URL for other domains
-                    url = URL(f"https://{domain}.com/{Path(file).name}")
+                    url = URL(f"https://example.com/{filename}")
+            else:
+                # Create a domain-based URL
+                url = URL(f"https://{domain}.com/{filename}")
+            
+            # Determine the download directory
+            download_dir = os.path.join(self.manager.args.download_directory, "Downloads")
+            os.makedirs(download_dir, exist_ok=True)
             
             # Create a MediaItem
-            download_dir = await self.manager.path_manager.get_download_dir()
             media_item = MediaItem(
                 url=url,
                 referer=url,
-                filename=Path(file).name,
+                filename=filename,
                 download_folder=download_dir,
                 parent_title="",
                 date=int(time.time())
@@ -1359,17 +1355,18 @@ class ColabDownloader:
             if task_id:
                 media_item.task_id = task_id
             
+            # Start the download using the appropriate downloader
+            from cyberdrop_dl.downloader.downloader import Downloader
+            
+            # Create a downloader instance if needed
+            if not hasattr(self, 'downloader_instance'):
+                self.downloader_instance = Downloader(self.manager)
+                
             # Start the download
-            if domain in self.manager.download_manager._download_instances:
-                self.force_print(f"Starting download using {domain} downloader")
-                self.manager.task_group.create_task(
-                    self.manager.download_manager._download_instances[domain].download(media_item)
-                )
-            else:
-                self.force_print(f"Starting download using no_crawler downloader")
-                self.manager.task_group.create_task(
-                    self.manager.download_manager._download_instances["no_crawler"].download(media_item)
-                )
+            self.force_print(f"Starting download for {filename}")
+            self.manager.task_group.create_task(
+                self.downloader_instance.download(media_item)
+            )
             
             return True
         except Exception as e:
