@@ -108,68 +108,58 @@ The Colab edition includes intelligent stall detection to identify and handle do
 
 ### Controlling Download Limits
 
-You can control the number of concurrent downloads to prevent overwhelming your Colab instance or getting rate-limited by servers:
+You can control the download limits to optimize performance:
 
 ```python
+# Using the Python wrapper with custom limits
 run_downloader(
     urls=["https://example.com/your-url"],
     max_downloads=10,  # Limit to 10 concurrent downloads
     max_per_domain=3   # Limit to 3 downloads per domain
 )
+
+# Using the command line
+!python colab_cyberdrop.py --max-downloads 10 --max-per-domain 3 https://example.com/your-url
+
+# Using cyberdrop-dl directly
+!cyberdrop-dl --colab-mode --download --max-simultaneous-downloads 10 --max-simultaneous-downloads-per-domain 3 https://example.com/your-url
 ```
 
-These limits help prevent:
-- Rate limiting from servers
+#### How Download Limits Work
+
+The download limits control how many files can be downloaded simultaneously:
+
+1. **max_downloads / max-simultaneous-downloads**: Controls the total number of files that can be downloaded at the same time across all domains. Default is 15.
+
+2. **max_per_domain / max-simultaneous-downloads-per-domain**: Controls how many files can be downloaded from a single domain at the same time. Default is 5.
+
+Setting these limits appropriately can help prevent:
+- Rate limiting by servers
 - Network congestion
-- Excessive resource usage in Colab
-- Crashes due to too many concurrent downloads
+- Memory issues in Colab
+- Excessive CPU usage
 
-The default values are:
-- `max_downloads`: 15 (total concurrent downloads)
-- `max_per_domain`: 5 (concurrent downloads per domain)
+For large downloads, consider using more conservative limits like `max_downloads=10` and `max_per_domain=3`.
 
-For large downloads, it's recommended to use conservative limits (10 total, 3 per domain) to ensure stability.
+### Ignoring Download History
 
-### Automatic Limit Enforcement
+If you want to re-download files that have been downloaded before, you can use the `--ignore-history` flag:
 
-The downloader now includes automatic limit enforcement to prevent issues:
+```python
+# Using the Python wrapper
+run_downloader(
+    urls=["https://example.com/your-url"],
+    ignore_history=True  # Re-download files even if they've been downloaded before
+)
 
-1. **Active Monitoring**: The downloader constantly monitors the number of active downloads
-2. **Warning Notifications**: When limits are exceeded, warnings are displayed in the output
-3. **Automatic Pausing**: If downloads exceed the limit, older downloads are automatically paused
-4. **Domain-Specific Limits**: Each domain is monitored separately to prevent overwhelming specific servers
-5. **Detailed Status**: The progress display shows detailed information about active downloads and limits
-6. **Download Queue**: New downloads are automatically queued when limits are reached
-7. **Aggressive Enforcement**: The system aggressively enforces limits to prevent crashes
-8. **Smart Queue Processing**: When downloads complete, queued downloads are automatically started
-9. **Dynamic Domain Limits**: Domain limits are temporarily increased when global capacity is available
-10. **Domain-Specific Queues**: The system tracks queued downloads by domain and prioritizes accordingly
-11. **Persistent Temporary Limits**: Once a domain limit is increased, it stays increased until the program ends
-12. **Balanced Distribution**: Available capacity is distributed among domains with queued downloads
-13. **Progressive Limit Increases**: Domain limits are increased gradually to prevent overwhelming servers
+# Using the command line
+!python colab_cyberdrop.py --ignore-history https://example.com/your-url
 
-This ensures that even if many downloads are queued, the system will remain stable and responsive.
+# Using cyberdrop-dl directly
+!cyberdrop-dl --colab-mode --download --ignore-history https://example.com/your-url
+```
 
-## Handling Stalled Downloads
-
-The Colab edition includes intelligent stall detection to identify and handle downloads that aren't making progress:
-
-1. **Smart Stall Detection**: Downloads are only marked as stalled if they meet specific criteria:
-   - No progress for more than the stall threshold (default: 120 seconds)
-   - Download speed has dropped significantly
-   - Not near completion (downloads at >95% are not considered stalled)
-
-2. **Detailed Stall Information**: For stalled downloads, the specific reason is shown:
-   - "No progress for X seconds"
-   - "Speed too low (X/s) for Y seconds"
-
-3. **Automatic Retry**: Stalled downloads are automatically retried up to a configurable number of times
-
-4. **Visual Indicators**: Stalled downloads are marked with a warning emoji (⚠️)
-
-5. **Intelligent Handling**: Downloads that are almost complete (>95%) are not retried even if they appear stalled
-
-### Controlling Download Limits
+### Controlling Stall Detection and Retries
 
 You can control how the downloader handles stalled downloads:
 
