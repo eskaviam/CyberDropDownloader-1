@@ -39,6 +39,14 @@ class ColabDownloader:
         self.current_domain_limit = 3     # Default domain limit
         self.active_domain_counts = {}    # Track active downloads per domain
         
+        # Semaphores for strict download limits
+        self.global_download_semaphore = None  # Will be initialized in _apply_download_limits
+        self.domain_semaphores = {}            # Domain-specific semaphores
+        
+        # Queue for pending downloads
+        self.download_queue = []
+        self.is_processing_queue = False
+        
     def startup(self) -> Manager:
         """
         Starts the program and returns the manager
@@ -68,6 +76,9 @@ class ColabDownloader:
         # Add a task to enforce download limits
         limit_enforcer_task = asyncio.create_task(self._enforce_download_limits())
         
+        # Add a task to process the download queue
+        queue_processor_task = asyncio.create_task(self._process_download_queue())
+        
         async with asyncio.TaskGroup() as task_group:
             self.manager.task_group = task_group
             await scrape_mapper.start()
@@ -76,11 +87,13 @@ class ColabDownloader:
         stalled_checker_task.cancel()
         heartbeat_task.cancel()
         limit_enforcer_task.cancel()
+        queue_processor_task.cancel()
         try:
             await progress_task
             await stalled_checker_task
             await heartbeat_task
             await limit_enforcer_task
+            await queue_processor_task
         except asyncio.CancelledError:
             pass
     
@@ -128,25 +141,45 @@ class ColabDownloader:
             domain_match = re.match(r'\(([^)]+)\)', file)
             if domain_match:
                 domain = domain_match.group(1).lower()
-                
-                # Track domain counts
-                if domain not in self.active_domain_counts:
-                    self.active_domain_counts[domain] = 0
-                self.active_domain_counts[domain] += 1
-                
-                # Log if we're exceeding domain limits
-                if self.active_domain_counts[domain] > self.current_domain_limit:
-                    self.force_print(f"⚠️ Warning: {self.active_domain_counts[domain]} active downloads for domain {domain} (limit: {self.current_domain_limit})")
             
-            # Log if we're exceeding total limits
-            active_count = len(self.active_downloads)
-            if active_count >= self.current_download_limit:
-                self.force_print(f"⚠️ Warning: {active_count} active downloads (limit: {self.current_download_limit})")
+            # Check if we're at or over the download limits
+            at_global_limit = len(self.active_downloads) >= self.current_download_limit
+            at_domain_limit = False
             
+            if domain:
+                domain_count = self.active_domain_counts.get(domain, 0)
+                at_domain_limit = domain_count >= self.current_domain_limit
+            
+            if at_global_limit or at_domain_limit:
+                # We're at a limit, queue this download instead of starting it immediately
+                if self.verbose_logging:
+                    if at_global_limit:
+                        self.force_print(f"Queuing download (global limit reached): {file}")
+                    else:
+                        self.force_print(f"Queuing download (domain limit reached for {domain}): {file}")
+                
+                # Get the original task ID from the progress manager
+                task_id = await original_add_task(file, expected_size)
+                
+                # Add to queue
+                self.download_queue.append({
+                    "file": file,
+                    "expected_size": expected_size,
+                    "domain": domain,
+                    "task_id": task_id
+                })
+                
+                # Return the task ID
+                return task_id
+            
+            # If we're not at a limit, proceed with the download
             if self.verbose_logging:
                 self.force_print(f"New download: {file} (size: {self._format_size(expected_size) if expected_size else 'unknown'})")
             
+            # Get the task ID from the progress manager
             task_id = await original_add_task(file, expected_size)
+            
+            # Add to active downloads
             self.active_downloads[task_id] = {
                 "filename": file,
                 "total": expected_size,
@@ -155,11 +188,20 @@ class ColabDownloader:
                 "last_update_time": time.time(),
                 "domain": domain
             }
+            
+            # Update domain counts
+            if domain:
+                if domain not in self.active_domain_counts:
+                    self.active_domain_counts[domain] = 0
+                self.active_domain_counts[domain] += 1
+            
             return task_id
         
         async def new_mark_task_completed(task_id):
             if task_id in self.active_downloads:
                 filename = self.active_downloads[task_id]["filename"]
+                domain = self.active_downloads[task_id].get("domain")
+                
                 # Only log if verbose logging is enabled
                 if self.verbose_logging:
                     self.force_print(f"Download completed: {Path(filename).name}")
@@ -167,12 +209,19 @@ class ColabDownloader:
                 # Remove from active downloads
                 del self.active_downloads[task_id]
                 
+                # Update domain counts
+                if domain and domain in self.active_domain_counts:
+                    self.active_domain_counts[domain] = max(0, self.active_domain_counts[domain] - 1)
+                
                 # Remove from retry attempts if it was being retried
                 if task_id in self.retry_attempts:
                     del self.retry_attempts[task_id]
                 
                 # Increment completed files counter
                 self.completed_files += 1
+                
+                # Process the download queue to start new downloads if possible
+                asyncio.create_task(self._process_download_queue())
             
             await original_mark_task_completed(task_id)
         
@@ -698,12 +747,9 @@ class ColabDownloader:
                 filename = Path(self.active_downloads[task_id]["filename"]).name
                 
                 # Update domain counts if available
-                domain = None
-                domain_match = re.match(r'\(([^)]+)\)', filename)
-                if domain_match:
-                    domain = domain_match.group(1).lower()
-                    if domain in self.active_domain_counts:
-                        self.active_domain_counts[domain] = max(0, self.active_domain_counts[domain] - 1)
+                domain = self.active_downloads[task_id].get("domain")
+                if domain and domain in self.active_domain_counts:
+                    self.active_domain_counts[domain] = max(0, self.active_domain_counts[domain] - 1)
                 
                 # Remove from active downloads
                 del self.active_downloads[task_id]
@@ -712,6 +758,9 @@ class ColabDownloader:
                 # Also remove from retry attempts if it was being retried
                 if task_id in self.retry_attempts:
                     del self.retry_attempts[task_id]
+                    
+                # Process the download queue to start new downloads if possible
+                asyncio.create_task(self._process_download_queue())
 
     def _apply_download_limits(self) -> None:
         """Apply download limits to avoid overwhelming servers"""
@@ -729,6 +778,9 @@ class ColabDownloader:
             
             # Store the limit for our own tracking
             self.current_download_limit = global_settings['Rate_Limiting_Options']['max_simultaneous_downloads']
+            
+            # Initialize the global semaphore for strict download limits
+            self.global_download_semaphore = asyncio.Semaphore(self.current_download_limit)
             
             # Recreate the download_session_limit with the new value
             self.manager.client_manager.download_session_limit = asyncio.Semaphore(
@@ -799,6 +851,10 @@ class ColabDownloader:
         
         self.force_print(f"Progress: {self.completed_files}/{self.total_files} files")
         
+        # Show queue information
+        if self.download_queue:
+            self.force_print(f"Queue: {len(self.download_queue)} downloads waiting")
+        
         # Show warning if exceeding limits
         if len(self.active_downloads) > max_downloads:
             self.force_print(f"⚠️ WARNING: {len(self.active_downloads)} active downloads exceeds limit of {max_downloads}")
@@ -863,7 +919,7 @@ class ColabDownloader:
         while True:
             try:
                 # Check if we're exceeding the total download limit
-                if len(self.active_downloads) > self.current_download_limit * 1.5:  # Allow some buffer
+                if len(self.active_downloads) > self.current_download_limit:
                     self.force_print(f"⚠️ WARNING: Too many active downloads ({len(self.active_downloads)}), enforcing limits")
                     
                     # Find downloads to pause (oldest first)
@@ -873,11 +929,15 @@ class ColabDownloader:
                     # Sort by start time (oldest first)
                     active_downloads.sort(key=lambda x: x[1]["start_time"])
                     
-                    # Calculate how many to pause
+                    # Calculate how many to pause - be more aggressive to get back under the limit quickly
                     excess = len(active_downloads) - self.current_download_limit
-                    if excess > 0:
-                        downloads_to_pause = active_downloads[:excess]
+                    # Pause at least 25% more than the excess to prevent oscillation
+                    to_pause = min(len(active_downloads) - 1, int(excess * 1.25) + 1)
+                    
+                    if to_pause > 0:
+                        downloads_to_pause = active_downloads[:to_pause]
                         
+                        self.force_print(f"Pausing {to_pause} downloads to enforce limits")
                         for task_id, download in downloads_to_pause:
                             filename = Path(download["filename"]).name
                             self.force_print(f"⏸️ Pausing download: {filename}")
@@ -889,8 +949,8 @@ class ColabDownloader:
                             self.failed_files += 1
                 
                 # Check if any domain is exceeding its limit
-                for domain, count in self.active_domain_counts.items():
-                    if count > self.current_domain_limit * 1.5:  # Allow some buffer
+                for domain, count in list(self.active_domain_counts.items()):
+                    if count > self.current_domain_limit:
                         self.force_print(f"⚠️ WARNING: Too many active downloads for domain {domain} ({count}), enforcing limits")
                         
                         # Find downloads for this domain
@@ -900,11 +960,15 @@ class ColabDownloader:
                         # Sort by start time (oldest first)
                         domain_downloads.sort(key=lambda x: x[1]["start_time"])
                         
-                        # Calculate how many to pause
+                        # Calculate how many to pause - be more aggressive
                         excess = count - self.current_domain_limit
-                        if excess > 0:
-                            downloads_to_pause = domain_downloads[:excess]
+                        # Pause at least 25% more than the excess to prevent oscillation
+                        to_pause = min(len(domain_downloads) - 1, int(excess * 1.25) + 1)
+                        
+                        if to_pause > 0:
+                            downloads_to_pause = domain_downloads[:to_pause]
                             
+                            self.force_print(f"Pausing {to_pause} downloads for domain {domain} to enforce limits")
                             for task_id, download in downloads_to_pause:
                                 filename = Path(download["filename"]).name
                                 self.force_print(f"⏸️ Pausing download for domain {domain}: {filename}")
@@ -914,12 +978,81 @@ class ColabDownloader:
                                 
                                 # Increment failed count
                                 self.failed_files += 1
+                
+                # Process the download queue to start new downloads if possible
+                if self.download_queue:
+                    await self._process_download_queue()
             
             except Exception as e:
                 self.force_print(f"Error in limit enforcer: {e}")
             
-            # Check every 30 seconds
-            await asyncio.sleep(30)
+            # Check every 15 seconds (more frequently)
+            await asyncio.sleep(15)
+
+    async def _process_download_queue(self) -> None:
+        """Process the download queue, respecting download limits"""
+        if self.is_processing_queue:
+            return
+            
+        self.is_processing_queue = True
+        
+        try:
+            # Process queue until empty
+            while self.download_queue:
+                # Check if we're at the global limit
+                if len(self.active_downloads) >= self.current_download_limit:
+                    # We're at the limit, stop processing the queue
+                    break
+                
+                # Get the next item from the queue
+                item = self.download_queue[0]
+                domain = item.get("domain")
+                file = item.get("file")
+                expected_size = item.get("expected_size")
+                original_task = item.get("original_task")
+                
+                # Check domain limits
+                if domain:
+                    domain_count = self.active_domain_counts.get(domain, 0)
+                    if domain_count >= self.current_domain_limit:
+                        # This domain is at its limit, try the next item
+                        # Move this item to the end of the queue
+                        self.download_queue.append(self.download_queue.pop(0))
+                        
+                        # If we've gone through the entire queue without finding a suitable item, stop
+                        if len(self.download_queue) <= 1:
+                            break
+                            
+                        continue
+                
+                # Remove the item from the queue
+                self.download_queue.pop(0)
+                
+                # Start the download
+                self.force_print(f"Starting queued download: {file}")
+                
+                # Create a new task for the download
+                if original_task:
+                    self.manager.task_group.create_task(original_task)
+                else:
+                    # If no original task, create a new one using the file info
+                    task_id = await self.manager.progress_manager.file_progress.add_task(file, expected_size)
+                    self.active_downloads[task_id] = {
+                        "filename": file,
+                        "total": expected_size,
+                        "completed": 0,
+                        "start_time": time.time(),
+                        "last_update_time": time.time(),
+                        "domain": domain
+                    }
+                    
+                    # Update domain counts
+                    if domain:
+                        if domain not in self.active_domain_counts:
+                            self.active_domain_counts[domain] = 0
+                        self.active_domain_counts[domain] += 1
+        finally:
+            self.is_processing_queue = False
 
 
 def main():

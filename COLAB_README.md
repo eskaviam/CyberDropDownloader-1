@@ -136,9 +136,12 @@ The downloader now includes automatic limit enforcement to prevent issues:
 
 1. **Active Monitoring**: The downloader constantly monitors the number of active downloads
 2. **Warning Notifications**: When limits are exceeded, warnings are displayed in the output
-3. **Automatic Pausing**: If downloads exceed 150% of the limit, older downloads are automatically paused
+3. **Automatic Pausing**: If downloads exceed the limit, older downloads are automatically paused
 4. **Domain-Specific Limits**: Each domain is monitored separately to prevent overwhelming specific servers
 5. **Detailed Status**: The progress display shows detailed information about active downloads and limits
+6. **Download Queue**: New downloads are automatically queued when limits are reached
+7. **Aggressive Enforcement**: The system aggressively enforces limits to prevent crashes
+8. **Smart Queue Processing**: When downloads complete, queued downloads are automatically started
 
 This ensures that even if many downloads are queued, the system will remain stable and responsive.
 
